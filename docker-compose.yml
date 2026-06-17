@@ -1,0 +1,29 @@
+version: "3.9"
+
+services:
+  hsei-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hsei_platform
+    ports:
+      - "8503:8501"
+    environment:
+      - DB_TYPE=sqlite
+      - PYTHONPATH=/app
+    volumes:
+      - hsei_db:/app/database
+      - hsei_logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+volumes:
+  hsei_db:
+    name: hsei_database_vol
+  hsei_logs:
+    name: hsei_logs_vol
