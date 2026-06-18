@@ -1,5 +1,6 @@
 # HSEI Platform
 ### HSE Incident Analytics & Process Safety Intelligence
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-Streamlit-red)](https://hsei-platform-ninahenchy.streamlit.app/)
 
 > Production-grade HSE analytics platform for Oil & Gas operations.
 > Standards: API RP 754 · ISO 45001 · OSHA 29 CFR 1910.119 · RIDDOR
@@ -8,6 +9,8 @@
 [![Streamlit](https://img.shields.io/badge/Streamlit-1.35-red)](https://streamlit.io)
 [![Standard](https://img.shields.io/badge/Standard-API%20RP%20754-orange)](.)
 [![Tests](https://img.shields.io/badge/Tests-29%20Passed-brightgreen)](.)
+
+![Dashboard](docs/screenshots/dashboard_preview.png)
 
 ---
 
