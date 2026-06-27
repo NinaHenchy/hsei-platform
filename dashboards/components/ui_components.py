@@ -18,6 +18,7 @@ THEME = {
     "orange":  "#e07b39",
     "gold":    "#d4a017",
     "blue":    "#818cf8",
+    "purple":  "#818cf8",
     "cyan":    "#48cae4",
     "plotly_bg":    "#1c1810",
     "plotly_paper": "#141210",
