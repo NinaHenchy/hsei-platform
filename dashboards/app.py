@@ -31,8 +31,8 @@ def _setup():
     os.makedirs(str(_root / "data" / "processed"), exist_ok=True)
     from database.db_connection import initialize_database
     initialize_database()
-    from etl.run_etl import run_etl_pipeline
-    run_etl_pipeline()
+    from etl.run_etl import run_etl
+    run_etl()
 
 def _db_has_data():
     try:
