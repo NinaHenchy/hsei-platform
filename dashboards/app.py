@@ -24,19 +24,43 @@ st.set_page_config(
 
 _db = _root / "database" / "hsei_dev.db"
 
+def _setup():
+    os.makedirs(str(_root / "database"), exist_ok=True)
+    os.makedirs(str(_root / "logs"), exist_ok=True)
+    os.makedirs(str(_root / "data" / "raw"), exist_ok=True)
+    os.makedirs(str(_root / "data" / "processed"), exist_ok=True)
+    from database.db_connection import initialize_database
+    initialize_database()
+    from etl.run_etl import run_etl_pipeline
+    run_etl_pipeline()
+
+def _db_has_data():
+    try:
+        from sqlalchemy import text
+        from database.db_connection import get_engine
+        eng = get_engine()
+        with eng.connect() as conn:
+            count = conn.execute(text("SELECT COUNT(*) FROM incidents")).scalar()
+        return count > 0
+    except Exception:
+        return False
+
 if not _db.exists():
     with st.spinner("First run — initialising HSEI database (~60 seconds)..."):
         try:
-            os.makedirs(str(_root / "database"), exist_ok=True)
-            os.makedirs(str(_root / "logs"), exist_ok=True)
-            os.makedirs(str(_root / "data" / "raw"), exist_ok=True)
-            os.makedirs(str(_root / "data" / "processed"), exist_ok=True)
-            from database.db_connection import initialize_database
-            initialize_database()
-            from etl.run_etl import run_etl_pipeline
-            run_etl_pipeline()
+            _setup()
         except Exception as e:
             st.error(f"Database setup failed: {e}")
+            st.exception(e)
+            st.stop()
+    st.rerun()
+
+if not _db_has_data():
+    with st.spinner("Loading data into database (~60 seconds)..."):
+        try:
+            _setup()
+        except Exception as e:
+            st.error(f"Data load failed: {e}")
             st.exception(e)
             st.stop()
     st.rerun()
@@ -69,6 +93,7 @@ with st.sidebar:
             "🔍  HSE Inspections & Audit",
             "📄  Permit to Work Analytics",
             "🎓  Training & Competency",
+            "➕  Data Entry",
         ],
         label_visibility="collapsed",
     )
@@ -107,3 +132,6 @@ elif "Permit to Work" in page:
 elif "Training" in page:
     from dashboards.pages.p2_to_p8 import render_training_competency
     render_training_competency()
+elif "Data Entry" in page:
+    from dashboards.pages.p_data_entry import render_data_entry
+    render_data_entry()

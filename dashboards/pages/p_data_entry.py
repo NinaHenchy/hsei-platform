@@ -1,7 +1,5 @@
 """
-HSEI Data Entry Page
-Log real HSE incidents, observations, actions, inspections and training.
-All entries saved permanently to the SQLite database.
+HSEI Data Entry — Log real HSE events directly to the database.
 """
 
 import sys
@@ -19,11 +17,6 @@ from sqlalchemy import text
 from dashboards.components.ui_components import (
     inject_css, page_header, section_header, THEME
 )
-from config.settings import (
-    INCIDENT_TYPES, INCIDENT_CATEGORIES, WORK_AREAS,
-    DEPARTMENTS, BODY_PARTS, ROOT_CAUSE_CATEGORIES,
-    INCIDENT_COST_ESTIMATES
-)
 
 
 def get_engine():
@@ -31,7 +24,7 @@ def get_engine():
     return _get()
 
 
-def render_hsei_data_entry():
+def render_data_entry():
     inject_css()
     page_header(
         "HSE Data Entry",
@@ -40,627 +33,293 @@ def render_hsei_data_entry():
     )
 
     st.info(
-        "All entries are saved to the SQLite database and immediately "
-        "reflected across all HSEI dashboard pages."
+        "All entries are saved directly to the database and immediately "
+        "reflected across all dashboard pages."
     )
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "🚨 Incident Report",
-        "👁️ Safety Observation",
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "⚠️ Incident / Near Miss",
         "✅ Corrective Action",
-        "🔍 HSE Inspection",
-        "🎓 Training Record",
+        "🔍 Inspection",
+        "📡 Safety Observation",
     ])
 
-    # ── TAB 1: INCIDENT REPORT ────────────────────────────────────────
     with tab1:
-        section_header("Report New HSE Incident")
-
+        section_header("Log New Incident or Near Miss")
         with st.form("incident_form", clear_on_submit=True):
             col1, col2 = st.columns(2)
-
             with col1:
-                inc_type = st.selectbox("Incident Type *", INCIDENT_TYPES)
-                inc_category = st.selectbox("Incident Category *", INCIDENT_CATEGORIES)
-                inc_date = st.date_input("Incident Date *", value=date.today())
-                inc_time = st.time_input("Incident Time *")
-                severity = st.selectbox(
-                    "Severity *",
-                    ["Critical", "High", "Medium", "Low", "Negligible"]
-                )
-                work_area = st.selectbox("Work Area *", WORK_AREAS)
-
+                inc_date      = st.date_input("Incident Date *", value=date.today())
+                inc_time      = st.time_input("Incident Time *")
+                inc_type      = st.selectbox("Incident Type *", [
+                    "Near Miss","First Aid","Medical Treatment",
+                    "Restricted Work","Lost Time Injury","Fatality",
+                    "Property Damage","Environmental Release","Process Safety Event"
+                ])
+                severity      = st.selectbox("Severity *", ["Critical","High","Medium","Low","Negligible"])
+                department    = st.selectbox("Department *", [
+                    "Operations","Maintenance","HSE","Drilling",
+                    "Process Engineering","Logistics","Contractor","Management"
+                ])
             with col2:
-                department = st.selectbox("Department *", DEPARTMENTS)
-                body_part = st.selectbox("Body Part Affected", BODY_PARTS)
-                days_lost = st.number_input(
-                    "Days Lost", min_value=0, max_value=365, value=0
-                )
-                days_restricted = st.number_input(
-                    "Days Restricted Work", min_value=0, max_value=365, value=0
-                )
-                emp_type = st.selectbox(
-                    "Employee Type", ["Direct", "Contractor", "Visitor"]
-                )
-                reported_by = st.text_input("Reported By *")
+                location      = st.text_input("Location / Area *")
+                reported_by   = st.text_input("Reported By")
+                days_lost     = st.number_input("Days Lost (LTI only)", min_value=0, max_value=365, value=0)
+                api_tier      = st.selectbox("API RP 754 Tier", ["N/A","Tier 1","Tier 2","Tier 3","Tier 4"])
+                regulatory    = st.checkbox("Regulatory Reportable?")
+                is_recurring  = st.checkbox("Recurring incident?")
 
-            description = st.text_area(
-                "Incident Description *",
-                placeholder="What happened? Where? When? Who was involved?"
-            )
+            description      = st.text_area("Incident Description *",
+                placeholder="What happened, where, who was involved, immediate consequences...")
+            immediate_action = st.text_area("Immediate Action Taken",
+                placeholder="What was done immediately after the incident?")
 
-            col3, col4 = st.columns(2)
-            with col3:
-                immediate_cause = st.text_area(
-                    "Immediate Cause",
-                    placeholder="What directly caused the incident?"
-                )
-                root_cause_cat = st.selectbox(
-                    "Root Cause Category", ROOT_CAUSE_CATEGORIES
-                )
-            with col4:
-                root_cause_desc = st.text_area(
-                    "Root Cause Description",
-                    placeholder="Explain the underlying root cause..."
-                )
-                contributing = st.text_area(
-                    "Contributing Factors",
-                    placeholder="What other factors contributed?"
-                )
-
-            col5, col6 = st.columns(2)
-            with col5:
-                reg_reportable = st.checkbox("Regulatory Reportable?")
-                is_recurring = st.checkbox("Is this a recurring incident?")
-            with col6:
-                env_impact = st.checkbox("Environmental Impact?")
-                spill_vol = st.number_input(
-                    "Spill Volume (litres)", min_value=0.0, value=0.0,
-                    step=1.0
-                ) if env_impact else 0.0
-
-            inc_submitted = st.form_submit_button(
-                "🚨 Submit Incident Report",
-                use_container_width=True,
-                type="primary"
-            )
-
-            if inc_submitted:
-                if not description or not reported_by:
-                    st.error("Please fill in all required fields (*).")
+            if st.form_submit_button("💾 Save Incident", use_container_width=True, type="primary"):
+                if not description or not location:
+                    st.error("Please fill in all required fields marked with *")
                 else:
                     try:
                         engine = get_engine()
-                        cost = INCIDENT_COST_ESTIMATES.get(inc_type, 5000)
-
+                        ref = f"INC-{inc_date.strftime('%Y%m%d')}-{datetime.now().strftime('%H%M%S')}"
                         with engine.connect() as conn:
-                            count = conn.execute(
-                                text("SELECT COUNT(*) FROM incidents")
-                            ).scalar()
-                            inc_number = f"INC-LIVE-{count+1:04d}"
-
                             conn.execute(text("""
                                 INSERT INTO incidents (
-                                    incident_number, incident_date, incident_time,
-                                    incident_type, incident_category, severity,
-                                    work_area, department, description,
-                                    immediate_cause, root_cause_category,
-                                    root_cause_description, contributing_factors,
-                                    body_part_affected, days_lost, days_restricted,
-                                    employee_type, reported_by,
+                                    incident_date, incident_time, incident_type,
+                                    severity, department, location,
+                                    description, immediate_action_taken,
+                                    days_lost, api_rp754_tier,
                                     regulatory_reportable, is_recurring,
-                                    environmental_impact, spill_volume_litres,
-                                    estimated_cost_usd, is_closed
+                                    reported_by, incident_reference
                                 ) VALUES (
-                                    :number, :inc_date, :inc_time,
-                                    :inc_type, :category, :severity,
-                                    :area, :dept, :description,
-                                    :immediate, :rc_cat,
-                                    :rc_desc, :contributing,
-                                    :body_part, :days_lost, :days_restricted,
-                                    :emp_type, :reported_by,
-                                    :reg_report, :recurring,
-                                    :env_impact, :spill_vol,
-                                    :cost, 0
+                                    :inc_date, :inc_time, :inc_type,
+                                    :severity, :dept, :location,
+                                    :description, :immediate,
+                                    :days_lost, :api_tier,
+                                    :regulatory, :recurring,
+                                    :reported_by, :ref
                                 )
                             """), {
-                                "number": inc_number,
-                                "inc_date": str(inc_date),
-                                "inc_time": str(inc_time),
-                                "inc_type": inc_type,
-                                "category": inc_category,
-                                "severity": severity,
-                                "area": work_area,
-                                "dept": department,
-                                "description": description,
-                                "immediate": immediate_cause,
-                                "rc_cat": root_cause_cat,
-                                "rc_desc": root_cause_desc,
-                                "contributing": contributing,
-                                "body_part": body_part,
-                                "days_lost": days_lost,
-                                "days_restricted": days_restricted,
-                                "emp_type": emp_type,
-                                "reported_by": reported_by,
-                                "reg_report": int(reg_reportable),
-                                "recurring": int(is_recurring),
-                                "env_impact": int(env_impact),
-                                "spill_vol": spill_vol if env_impact else None,
-                                "cost": cost,
+                                "inc_date": str(inc_date), "inc_time": str(inc_time),
+                                "inc_type": inc_type, "severity": severity,
+                                "dept": department, "location": location,
+                                "description": description, "immediate": immediate_action,
+                                "days_lost": days_lost, "api_tier": api_tier,
+                                "regulatory": int(regulatory), "recurring": int(is_recurring),
+                                "reported_by": reported_by, "ref": ref,
                             })
                             conn.commit()
-
-                        level = "critical" if severity in ["Critical","High"] else "warning"
-                        if severity in ["Critical","High"]:
-                            st.error(
-                                f"🚨 {severity.upper()} incident logged: **{inc_number}**\n\n"
-                                f"Notify HSE Manager and line management immediately.\n\n"
-                                f"Navigate to **Incident Register** to see the record."
-                            )
-                        else:
-                            st.success(
-                                f"✅ Incident logged: **{inc_number}**\n\n"
-                                f"**Type:** {inc_type} | **Area:** {work_area}\n\n"
-                                f"Navigate to **Incident Register** to see the record."
-                            )
-
+                        st.success(f"✅ Incident logged! Reference: {ref}")
                     except Exception as e:
                         st.error(f"Error saving incident: {e}")
 
-    # ── TAB 2: SAFETY OBSERVATION ─────────────────────────────────────
     with tab2:
-        section_header("Submit Safety Observation / Near Miss")
-
-        with st.form("obs_form", clear_on_submit=True):
-            col1, col2 = st.columns(2)
-
-            with col1:
-                obs_type = st.selectbox(
-                    "Observation Type *",
-                    ["Near Miss", "Unsafe Act", "Unsafe Condition",
-                     "Good Practice", "Safety Walk", "Stop Work Authority",
-                     "Dropped Object Potential", "Environmental Concern"]
-                )
-                obs_date = st.date_input("Date *", value=date.today(), key="obs_d")
-                obs_area = st.selectbox("Work Area *", WORK_AREAS, key="obs_a")
-                obs_dept = st.selectbox("Department", DEPARTMENTS, key="obs_dept")
-
-            with col2:
-                pot_severity = st.selectbox(
-                    "Potential Severity *",
-                    ["Critical", "High", "Medium", "Low"]
-                )
-                obs_reporter = st.text_input("Reported By (leave blank to stay anonymous)")
-                is_anonymous = not bool(obs_reporter)
-                followup_needed = st.checkbox(
-                    "Follow-up action required?",
-                    value=obs_type in ["Near Miss","Unsafe Act","Unsafe Condition",
-                                       "Stop Work Authority"]
-                )
-
-            obs_description = st.text_area(
-                "Description *",
-                placeholder="Describe what you observed. Be specific about location, activity, and hazard."
-            )
-            immediate_action = st.text_area(
-                "Immediate Action Taken",
-                placeholder="What was done immediately to control the hazard?"
-            )
-            followup_action = st.text_area(
-                "Recommended Follow-up Action",
-                placeholder="What further action should be taken?"
-            ) if followup_needed else ""
-
-            obs_submitted = st.form_submit_button(
-                "👁️ Submit Observation",
-                use_container_width=True,
-                type="primary"
-            )
-
-            if obs_submitted:
-                if not obs_description:
-                    st.error("Please provide an observation description.")
-                else:
-                    try:
-                        engine = get_engine()
-                        with engine.connect() as conn:
-                            count = conn.execute(
-                                text("SELECT COUNT(*) FROM safety_observations")
-                            ).scalar()
-                            obs_number = f"OBS-LIVE-{count+1:04d}"
-
-                            conn.execute(text("""
-                                INSERT INTO safety_observations (
-                                    observation_number, observation_date,
-                                    observation_type, work_area, department,
-                                    description, potential_severity,
-                                    reported_by, is_anonymous,
-                                    immediate_action_taken,
-                                    followup_required, followup_action,
-                                    followup_complete
-                                ) VALUES (
-                                    :number, :obs_date,
-                                    :obs_type, :area, :dept,
-                                    :description, :severity,
-                                    :reporter, :anon,
-                                    :immediate,
-                                    :followup_req, :followup_act,
-                                    0
-                                )
-                            """), {
-                                "number": obs_number,
-                                "obs_date": str(obs_date),
-                                "obs_type": obs_type,
-                                "area": obs_area,
-                                "dept": obs_dept,
-                                "description": obs_description,
-                                "severity": pot_severity,
-                                "reporter": obs_reporter or "Anonymous",
-                                "anon": int(is_anonymous),
-                                "immediate": immediate_action,
-                                "followup_req": int(followup_needed),
-                                "followup_act": followup_action,
-                            })
-                            conn.commit()
-
-                        st.success(
-                            f"✅ Observation submitted: **{obs_number}**\n\n"
-                            f"**Type:** {obs_type} | **Potential Severity:** {pot_severity}\n\n"
-                            f"Thank you for reporting. Every observation improves safety.\n\n"
-                            f"Navigate to **Leading Indicators** to see the update."
-                        )
-
-                    except Exception as e:
-                        st.error(f"Error saving observation: {e}")
-
-    # ── TAB 3: CORRECTIVE ACTION ──────────────────────────────────────
-    with tab3:
-        section_header("Raise Corrective Action")
-        st.caption("Raise a standalone corrective action or close out an existing one.")
-
-        engine = get_engine()
-
-        # Show open actions for close-out
-        open_actions = pd.read_sql("""
-            SELECT ca.action_number, ca.description, ca.status, ca.due_date,
-                   ca.assigned_to
-            FROM corrective_actions ca
-            WHERE ca.status IN ('Open','In Progress','Overdue')
-            ORDER BY ca.due_date
-            LIMIT 20
-        """, engine)
-
-        if not open_actions.empty:
-            st.markdown("**Open Actions — Update Status**")
-            selected_action = st.selectbox(
-                "Select action to update (optional)",
-                options=["-- Raise New Action --"] + open_actions["action_number"].tolist()
-            )
-
-            if selected_action != "-- Raise New Action --":
-                action_row = open_actions[
-                    open_actions["action_number"] == selected_action
-                ].iloc[0]
-                st.info(f"**{selected_action}:** {action_row['description'][:100]}")
-
-                new_status = st.selectbox(
-                    "Update Status",
-                    ["In Progress", "Closed", "Cancelled"]
-                )
-                completion_notes = st.text_area("Completion Notes")
-
-                if st.button("✅ Update Action Status", type="primary"):
-                    try:
-                        with engine.connect() as conn:
-                            conn.execute(text("""
-                                UPDATE corrective_actions
-                                SET status = :status,
-                                    completion_date = :comp_date,
-                                    notes = :notes
-                                WHERE action_number = :number
-                            """), {
-                                "status": new_status,
-                                "comp_date": str(date.today()) if new_status == "Closed" else None,
-                                "notes": completion_notes,
-                                "number": selected_action,
-                            })
-                            conn.commit()
-                        st.success(f"✅ Action **{selected_action}** updated to **{new_status}**")
-                    except Exception as e:
-                        st.error(f"Error: {e}")
-
-        st.markdown("---")
-        st.markdown("**Raise New Corrective Action**")
-
+        section_header("Log New Corrective Action")
         with st.form("ca_form", clear_on_submit=True):
             col1, col2 = st.columns(2)
             with col1:
-                ca_type = st.selectbox("Action Type *", [
-                    "Immediate Corrective Action",
-                    "Root Cause Corrective Action",
-                    "Preventive Action",
-                    "System Improvement",
-                    "Training Requirement",
-                    "Engineering Control",
-                    "Administrative Control",
+                ca_ref        = st.text_input("CA Reference *", placeholder="CA-2024-001")
+                ca_title      = st.text_input("Action Title *")
+                ca_type       = st.selectbox("Action Type *", [
+                    "Corrective Action","Preventive Action",
+                    "Improvement Action","Immediate Action"
                 ])
-                ca_priority = st.selectbox("Priority *", ["Critical","High","Medium","Low"])
-                ca_due = st.date_input("Due Date *", value=date.today())
-
+                priority      = st.selectbox("Priority *", ["Critical","High","Medium","Low"])
+                dept_ca       = st.selectbox("Responsible Department *", [
+                    "Operations","Maintenance","HSE","Drilling",
+                    "Process Engineering","Logistics","Management"
+                ])
             with col2:
-                ca_assigned_to = st.text_input("Assigned To *")
-                ca_dept = st.selectbox("Assigned Department", DEPARTMENTS, key="ca_dept")
+                assigned_to   = st.text_input("Assigned To *")
+                due_date      = st.date_input("Due Date *", value=date.today())
+                open_date     = st.date_input("Date Raised", value=date.today())
+                status        = st.selectbox("Status", ["Open","In Progress","Completed","Overdue","Cancelled"])
+                completion_date = st.date_input("Completion Date", value=None)
 
-            ca_description = st.text_area(
-                "Action Description *",
-                placeholder="What action needs to be taken? Be specific and measurable."
-            )
+            ca_description = st.text_area("Action Description *",
+                placeholder="Describe the corrective action required...")
+            verification   = st.text_area("Verification Method",
+                placeholder="How will completion be verified?")
 
-            ca_submitted = st.form_submit_button(
-                "✅ Raise Corrective Action",
-                use_container_width=True,
-                type="primary"
-            )
-
-            if ca_submitted:
-                if not ca_description or not ca_assigned_to:
-                    st.error("Please fill in all required fields.")
+            if st.form_submit_button("💾 Save Corrective Action", use_container_width=True, type="primary"):
+                if not ca_title or not assigned_to or not ca_ref:
+                    st.error("Please fill in all required fields marked with *")
                 else:
                     try:
+                        engine = get_engine()
                         with engine.connect() as conn:
-                            count = conn.execute(
-                                text("SELECT COUNT(*) FROM corrective_actions")
-                            ).scalar()
-                            ca_number = f"CA-LIVE-{count+1:04d}"
-
                             conn.execute(text("""
                                 INSERT INTO corrective_actions (
-                                    action_number, action_type, description,
-                                    assigned_to, assigned_department,
-                                    due_date, status, priority,
-                                    verification_required
+                                    ca_reference, title, action_type,
+                                    priority, responsible_department,
+                                    assigned_to, due_date, open_date,
+                                    status, description, verification_method,
+                                    completion_date
                                 ) VALUES (
-                                    :number, :ca_type, :description,
-                                    :assigned, :dept,
-                                    :due_date, 'Open', :priority,
-                                    1
+                                    :ref, :title, :ca_type,
+                                    :priority, :dept,
+                                    :assigned_to, :due_date, :open_date,
+                                    :status, :description, :verification,
+                                    :completion_date
                                 )
                             """), {
-                                "number": ca_number,
-                                "ca_type": ca_type,
+                                "ref": ca_ref, "title": ca_title, "ca_type": ca_type,
+                                "priority": priority, "dept": dept_ca,
+                                "assigned_to": assigned_to,
+                                "due_date": str(due_date),
+                                "open_date": str(open_date),
+                                "status": status,
                                 "description": ca_description,
-                                "assigned": ca_assigned_to,
-                                "dept": ca_dept,
-                                "due_date": str(ca_due),
-                                "priority": ca_priority,
+                                "verification": verification,
+                                "completion_date": str(completion_date) if completion_date else None,
                             })
                             conn.commit()
-
-                        st.success(
-                            f"✅ Action raised: **{ca_number}**\n\n"
-                            f"**Assigned to:** {ca_assigned_to} | **Due:** {ca_due}\n\n"
-                            f"Navigate to **Corrective Actions Tracker** to monitor."
-                        )
+                        st.success(f"✅ Corrective action saved! Reference: {ca_ref}")
                     except Exception as e:
-                        st.error(f"Error: {e}")
+                        st.error(f"Error saving corrective action: {e}")
 
-    # ── TAB 4: HSE INSPECTION ─────────────────────────────────────────
-    with tab4:
-        section_header("Log HSE Inspection / Audit")
-
-        with st.form("insp_form", clear_on_submit=True):
+    with tab3:
+        section_header("Log New Inspection")
+        with st.form("inspection_form", clear_on_submit=True):
             col1, col2 = st.columns(2)
-
             with col1:
-                insp_type = st.selectbox("Inspection Type *", [
-                    "Daily Safety Walk", "Weekly HSE Inspection",
-                    "Monthly Audit", "Quarterly Management Audit",
-                    "Regulatory Inspection", "Third Party Audit",
-                    "Pre-Job Safety Inspection", "Emergency Response Drill",
+                insp_date     = st.date_input("Inspection Date *", value=date.today())
+                insp_type     = st.selectbox("Inspection Type *", [
+                    "General HSE Inspection","Process Safety Inspection",
+                    "PTW Audit","Housekeeping Inspection",
+                    "Emergency Equipment Check","Environmental Inspection",
+                    "Contractor HSE Inspection","Regulatory Inspection"
                 ])
-                insp_date = st.date_input("Inspection Date *", value=date.today(), key="insp_d")
-                insp_area = st.selectbox("Work Area *", WORK_AREAS, key="insp_a")
-                inspector = st.text_input("Inspector Name *")
-
+                dept_insp     = st.selectbox("Area / Department *", [
+                    "Operations","Maintenance","HSE","Drilling",
+                    "Process Engineering","Logistics","Site-Wide"
+                ])
+                inspector     = st.text_input("Inspector Name *")
             with col2:
-                insp_score = st.slider("Inspection Score *", 0, 100, 85)
-                items_inspected = st.number_input("Items Inspected", min_value=1, value=10)
-                findings = st.number_input("Total Findings", min_value=0, value=0)
-                critical_f = st.number_input("Critical Findings", min_value=0, value=0)
-                major_f = st.number_input("Major Findings", min_value=0, value=0)
+                score         = st.slider("Inspection Score *", 0, 100, 80)
+                findings      = st.number_input("Number of Findings", min_value=0, max_value=50, value=0)
+                critical_findings = st.number_input("Critical Findings", min_value=0, max_value=10, value=0)
+                action_required = st.checkbox("Corrective Action Required?")
 
-            if insp_score >= 90:   rating = "Excellent"
-            elif insp_score >= 80: rating = "Good"
-            elif insp_score >= 70: rating = "Satisfactory"
-            elif insp_score >= 60: rating = "Unsatisfactory"
-            else:                  rating = "Critical"
+            insp_notes = st.text_area("Inspection Notes",
+                placeholder="Summary of key observations and findings...")
 
-            st.info(f"Overall Rating: **{rating}**")
-            insp_notes = st.text_area("Inspection Notes / Findings Summary")
-
-            insp_submitted = st.form_submit_button(
-                "🔍 Save Inspection Record",
-                use_container_width=True,
-                type="primary"
-            )
-
-            if insp_submitted:
+            if st.form_submit_button("💾 Save Inspection", use_container_width=True, type="primary"):
                 if not inspector:
-                    st.error("Please enter inspector name.")
+                    st.error("Please provide inspector name")
                 else:
                     try:
                         engine = get_engine()
+                        ref = f"INSP-{insp_date.strftime('%Y%m')}-{datetime.now().strftime('%H%M%S')}"
                         with engine.connect() as conn:
-                            count = conn.execute(
-                                text("SELECT COUNT(*) FROM hse_inspections")
-                            ).scalar()
-                            insp_number = f"INSP-LIVE-{count+1:04d}"
-
                             conn.execute(text("""
-                                INSERT INTO hse_inspections (
-                                    inspection_number, inspection_date,
-                                    inspection_type, work_area, inspector,
-                                    inspection_score, items_inspected,
-                                    findings_count, critical_findings,
-                                    major_findings, minor_findings,
-                                    actions_raised, overall_rating, notes
+                                INSERT INTO inspections (
+                                    inspection_date, inspection_type,
+                                    department, inspector_name,
+                                    inspection_score, findings_count,
+                                    critical_findings, action_required,
+                                    notes, inspection_reference
                                 ) VALUES (
-                                    :number, :date, :type, :area, :inspector,
-                                    :score, :items, :findings, :critical,
-                                    :major, :minor, :actions, :rating, :notes
+                                    :date, :type, :dept, :inspector,
+                                    :score, :findings, :critical,
+                                    :action_req, :notes, :ref
                                 )
                             """), {
-                                "number": insp_number,
-                                "date": str(insp_date),
-                                "type": insp_type,
-                                "area": insp_area,
-                                "inspector": inspector,
-                                "score": insp_score,
-                                "items": items_inspected,
-                                "findings": findings,
-                                "critical": critical_f,
-                                "major": major_f,
-                                "minor": max(0, findings - critical_f - major_f),
-                                "actions": findings,
-                                "rating": rating,
-                                "notes": insp_notes,
+                                "date": str(insp_date), "type": insp_type,
+                                "dept": dept_insp, "inspector": inspector,
+                                "score": score, "findings": findings,
+                                "critical": critical_findings,
+                                "action_req": int(action_required),
+                                "notes": insp_notes, "ref": ref,
                             })
                             conn.commit()
-
-                        st.success(
-                            f"✅ Inspection logged: **{insp_number}**\n\n"
-                            f"**Score:** {insp_score}/100 — {rating}\n\n"
-                            f"Navigate to **HSE Inspections & Audit** to see the update."
-                        )
+                        st.success(f"✅ Inspection saved! Ref: {ref} | Score: {score}/100")
                     except Exception as e:
-                        st.error(f"Error: {e}")
+                        st.error(f"Error saving inspection: {e}")
 
-    # ── TAB 5: TRAINING RECORD ────────────────────────────────────────
-    with tab5:
-        section_header("Log Training Completion")
-
-        with st.form("training_form", clear_on_submit=True):
+    with tab4:
+        section_header("Log Safety Observation")
+        with st.form("obs_form", clear_on_submit=True):
             col1, col2 = st.columns(2)
-
             with col1:
-                emp_name = st.text_input("Employee Name *")
-                emp_id = st.text_input("Employee ID", placeholder="e.g. EMP-0001")
-                dept = st.selectbox("Department *", DEPARTMENTS, key="tr_dept")
-                emp_type = st.selectbox("Employee Type", ["Direct","Contractor","Visitor"])
-
-            with col2:
-                course = st.text_input(
-                    "Training Course *",
-                    placeholder="e.g. Basic H2S Safety"
-                )
-                category = st.selectbox("Training Category", [
-                    "Process Safety", "Emergency Response", "Safety Management",
-                    "Physical Hazards", "Chemical Safety", "Environmental",
-                    "Electrical Safety", "Offshore Safety", "Ergonomics",
+                obs_date      = st.date_input("Observation Date *", value=date.today())
+                obs_type      = st.selectbox("Observation Type *", [
+                    "Safe Behaviour","Unsafe Behaviour","Unsafe Condition",
+                    "Near Miss","Environmental Concern","Stop Work Authority",
+                    "Positive Observation","Housekeeping"
                 ])
-                train_date = st.date_input("Training Date *", value=date.today(), key="tr_date")
-                validity_days = st.selectbox(
-                    "Certificate Validity",
-                    [365, 730, 1095, 1825],
-                    format_func=lambda x: f"{x} days ({x//365} year{'s' if x//365>1 else ''})"
-                )
-                score = st.slider("Assessment Score (%)", 0, 100, 85)
-                trainer = st.text_input("Trainer / Provider")
+                dept_obs      = st.selectbox("Department *", [
+                    "Operations","Maintenance","HSE","Drilling",
+                    "Process Engineering","Logistics","Contractor","Management"
+                ])
+                observed_by   = st.text_input("Observed By *")
+            with col2:
+                risk_level    = st.selectbox("Risk Level", ["Low","Medium","High","Critical"])
+                immediate_act = st.checkbox("Immediate Action Taken?")
+                acknowledged  = st.checkbox("Acknowledged by Supervisor?")
 
-            tr_submitted = st.form_submit_button(
-                "🎓 Save Training Record",
-                use_container_width=True,
-                type="primary"
-            )
+            obs_description = st.text_area("Observation Description *",
+                placeholder="What did you observe? Be specific about location, activity, and conditions...")
+            action_taken = st.text_area("Action Taken",
+                placeholder="What action was taken or recommended?")
 
-            if tr_submitted:
-                if not emp_name or not course:
-                    st.error("Please fill in employee name and course name.")
+            if st.form_submit_button("💾 Save Observation", use_container_width=True, type="primary"):
+                if not obs_description or not observed_by:
+                    st.error("Please fill in all required fields marked with *")
                 else:
                     try:
-                        from datetime import timedelta
                         engine = get_engine()
-                        expiry = train_date + timedelta(days=validity_days)
-                        cert_number = f"CERT-LIVE-{datetime.now().strftime('%Y%m%d%H%M%S')}"
-                        emp_id_final = emp_id or f"EMP-{datetime.now().strftime('%H%M%S')}"
-
+                        ref = f"OBS-{obs_date.strftime('%Y%m%d')}-{datetime.now().strftime('%H%M%S')}"
                         with engine.connect() as conn:
                             conn.execute(text("""
-                                INSERT INTO training_records (
-                                    employee_id, employee_name, department,
-                                    employee_type, training_course, training_category,
-                                    training_date, expiry_date, is_expired,
-                                    score_pct, passed, trainer,
-                                    training_provider, certificate_number, mandatory
+                                INSERT INTO safety_observations (
+                                    observation_date, observation_type,
+                                    department, observed_by,
+                                    risk_level, description,
+                                    action_taken, immediate_action_taken,
+                                    acknowledged_by_supervisor,
+                                    observation_reference
                                 ) VALUES (
-                                    :emp_id, :name, :dept,
-                                    :emp_type, :course, :category,
-                                    :train_date, :expiry, 0,
-                                    :score, 1, :trainer,
-                                    :provider, :cert, 1
+                                    :date, :obs_type, :dept, :observed_by,
+                                    :risk, :description, :action,
+                                    :immediate, :acknowledged, :ref
                                 )
                             """), {
-                                "emp_id": emp_id_final,
-                                "name": emp_name,
-                                "dept": dept,
-                                "emp_type": emp_type,
-                                "course": course,
-                                "category": category,
-                                "train_date": str(train_date),
-                                "expiry": str(expiry),
-                                "score": score,
-                                "trainer": trainer,
-                                "provider": trainer,
-                                "cert": cert_number,
+                                "date": str(obs_date), "obs_type": obs_type,
+                                "dept": dept_obs, "observed_by": observed_by,
+                                "risk": risk_level, "description": obs_description,
+                                "action": action_taken,
+                                "immediate": int(immediate_act),
+                                "acknowledged": int(acknowledged),
+                                "ref": ref,
                             })
                             conn.commit()
-
-                        st.success(
-                            f"✅ Training record saved!\n\n"
-                            f"**Employee:** {emp_name} | **Course:** {course}\n\n"
-                            f"**Certificate:** {cert_number} | **Expires:** {expiry}\n\n"
-                            f"Navigate to **Training & Competency** to see the update."
-                        )
+                        st.success(f"✅ Observation saved! Reference: {ref}")
                     except Exception as e:
-                        st.error(f"Error: {e}")
+                        st.error(f"Error saving observation: {e}")
 
-    # ── RECENT ENTRIES ────────────────────────────────────────────────
     st.markdown("<br>", unsafe_allow_html=True)
-    section_header("Recent Live Entries")
-
+    section_header("Recent Entries")
     engine = get_engine()
     col_r1, col_r2 = st.columns(2)
-
     with col_r1:
         st.markdown("**Recent Incidents**")
         try:
             df = pd.read_sql("""
-                SELECT incident_number, incident_date, incident_type,
-                       severity, work_area
-                FROM incidents
-                WHERE incident_number LIKE 'INC-LIVE-%'
-                ORDER BY rowid DESC LIMIT 5
+                SELECT incident_date, incident_type, severity, department
+                FROM incidents ORDER BY rowid DESC LIMIT 5
             """, engine)
-            if not df.empty:
-                st.dataframe(df, use_container_width=True, hide_index=True)
-            else:
-                st.caption("No live incidents logged yet.")
+            st.dataframe(df, use_container_width=True, hide_index=True) if not df.empty \
+                else st.caption("No incidents logged yet.")
         except Exception:
-            pass
-
+            st.caption("No incidents logged yet.")
     with col_r2:
-        st.markdown("**Recent Observations**")
+        st.markdown("**Recent Corrective Actions**")
         try:
             df = pd.read_sql("""
-                SELECT observation_number, observation_date,
-                       observation_type, potential_severity
-                FROM safety_observations
-                WHERE observation_number LIKE 'OBS-LIVE-%'
-                ORDER BY rowid DESC LIMIT 5
+                SELECT ca_reference, title, priority, status, assigned_to
+                FROM corrective_actions ORDER BY rowid DESC LIMIT 5
             """, engine)
-            if not df.empty:
-                st.dataframe(df, use_container_width=True, hide_index=True)
-            else:
-                st.caption("No live observations logged yet.")
+            st.dataframe(df, use_container_width=True, hide_index=True) if not df.empty \
+                else st.caption("No corrective actions logged yet.")
         except Exception:
-            pass
+            st.caption("No corrective actions logged yet.")
